@@ -27,12 +27,17 @@ class SingleStageDetector(BaseDetector):
                  init_cfg: OptMultiConfig = None) -> None:
         super().__init__(
             data_preprocessor=data_preprocessor, init_cfg=init_cfg)
-        self.backbone = MODELS.build(backbone)
-        if neck is not None:
-            self.neck = MODELS.build(neck)
-        bbox_head.update(train_cfg=train_cfg)
-        bbox_head.update(test_cfg=test_cfg)
-        self.bbox_head = MODELS.build(bbox_head)
+        if isinstance(backbone, dict):
+            backbone = MODELS.build(backbone)
+        self.backbone = backbone
+        if neck is not None and isinstance(neck, dict):
+            neck = MODELS.build(neck)
+        self.neck = neck
+        if isinstance(bbox_head, dict):
+            bbox_head.update(train_cfg=train_cfg)
+            bbox_head.update(test_cfg=test_cfg)
+            MODELS.build(bbox_head)
+        self.bbox_head = bbox_head
         self.train_cfg = train_cfg
         self.test_cfg = test_cfg
 
