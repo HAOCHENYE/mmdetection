@@ -45,9 +45,9 @@ def quality_focal_loss(pred, target, beta=2.0):
     pos_label = label[pos].long()
     # positives are supervised by bbox quality (IoU) score
     scale_factor = score[pos] - pred_sigmoid[pos, pos_label]
-    loss[pos, pos_label] = F.binary_cross_entropy_with_logits(
+    loss[pos, pos_label] = (F.binary_cross_entropy_with_logits(
         pred[pos, pos_label], score[pos],
-        reduction='none') * scale_factor.abs().pow(beta)
+        reduction='none') * scale_factor.abs().pow(beta)).type_as(loss)
 
     loss = loss.sum(dim=1, keepdim=False)
     return loss

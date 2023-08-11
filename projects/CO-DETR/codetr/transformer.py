@@ -4,16 +4,16 @@ import warnings
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from mmengine.model import BaseModule
-from mmengine.model.weight_init import xavier_init
-from mmdet.registry import MODELS
 from mmcv.cnn.bricks.transformer import (BaseTransformerLayer,
                                          TransformerLayerSequence,
                                          build_transformer_layer_sequence)
-from mmdet.models.layers.transformer import inverse_sigmoid
 from mmcv.ops import MultiScaleDeformableAttention
+from mmengine.model import BaseModule
+from mmengine.model.weight_init import xavier_init
 from torch.nn.init import normal_
 
+from mmdet.models.layers.transformer import inverse_sigmoid
+from mmdet.registry import MODELS
 
 try:
     from fairscale.nn.checkpoint import checkpoint_wrapper
@@ -308,6 +308,7 @@ class DeformableDetrTransformer(Transformer):
         output_memory = output_memory.masked_fill(~output_proposals_valid,
                                                   float(0))
         output_memory = self.enc_output_norm(self.enc_output(output_memory))
+        output_proposals = output_proposals.type_as(output_memory)
         return output_memory, output_proposals
 
     @staticmethod
@@ -1034,8 +1035,11 @@ class DinoTransformerDecoder(DeformableDetrTransformerDecoder):
                 reference_points_input = \
                     reference_points[:, :, None] * valid_ratios[:, None]
 
+            # `query_sine_embed` will be float by default. Just convert it to
+            # the same type as `query` to avoid type mismatch when using pure
+            # bf16/fp16 training
             query_sine_embed = self.gen_sineembed_for_position(
-                reference_points_input[:, :, 0, :], self.embed_dims//2)
+                reference_points_input[:, :, 0, :], self.embed_dims//2).type_as(query)
             query_pos = self.ref_point_head(query_sine_embed)
 
             query_pos = query_pos.permute(1, 0, 2)
@@ -1262,12 +1266,16 @@ class CoDinoTransformer(CoDeformableDetrTransformer):
         topk_coords_unact = inverse_sigmoid((pos_anchors))
         reference_points = (pos_anchors)
         init_reference_out = reference_points
+
+        # get_proposal_pos_embed will return a float tensor by default.
+        # convert it to the same type as `mlvl_feats` to avoid type mismatch
+        # during pure fp16/bf16 training
         if self.num_co_heads > 0:
             pos_trans_out = self.aux_pos_trans_norm[head_idx](
-                self.aux_pos_trans[head_idx](self.get_proposal_pos_embed(topk_coords_unact)))
+                self.aux_pos_trans[head_idx](self.get_proposal_pos_embed(topk_coords_unact).type_as(mlvl_feats[0])))
             query = pos_trans_out
             if self.with_coord_feat:
-                query = query + self.pos_feats_norm[head_idx](self.pos_feats_trans[head_idx](pos_feats))
+                query = query + self.pos_feats_norm[head_idx](self.pos_feats_trans[head_idx](pos_feats).type_as(mlvl_feats[0]))
 
         # decoder
         query = query.permute(1, 0, 2)
@@ -1291,6 +1299,7 @@ class CoDinoTransformer(CoDeformableDetrTransformer):
 
 
 from mmcv.cnn import build_norm_layer
+
 
 @MODELS.register_module()
 class DetrTransformerEncoder(TransformerLayerSequence):

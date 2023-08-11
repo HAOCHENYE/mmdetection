@@ -1,26 +1,26 @@
 # Copyright (c) OpenMMLab. All rights reserved.
+import copy
+from typing import Dict, List, Tuple
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import copy 
-from typing import Dict, List, Tuple
-from torch import Tensor
-from mmengine.structures import InstanceData
-from mmcv.ops import batched_nms
-from mmdet.utils import InstanceList, reduce_mean
-from mmdet.structures import SampleList
-from mmdet.registry import MODELS, TASK_UTILS
-from mmdet.structures.bbox import (bbox_cxcywh_to_xyxy, bbox_xyxy_to_cxcywh, bbox_overlaps)
-from mmdet.models.utils import multi_apply, unpack_gt_instances
-from mmdet.models.layers.transformer import inverse_sigmoid
-from mmcv.ops import batched_nms
-from mmdet.models.task_modules.samplers import PseudoSampler
 from mmcv.cnn import Linear
+from mmcv.ops import batched_nms, interpolate
+from mmengine.structures import InstanceData
+from torch import Tensor
 
+from mmdet.models import DINOHead
+from mmdet.models.layers import CdnQueryGenerator
+from mmdet.models.layers.transformer import inverse_sigmoid
+from mmdet.models.task_modules.samplers import PseudoSampler
+from mmdet.models.utils import multi_apply, unpack_gt_instances
+from mmdet.registry import MODELS, TASK_UTILS
+from mmdet.structures import SampleList
+from mmdet.structures.bbox import (bbox_cxcywh_to_xyxy, bbox_overlaps,
+                                   bbox_xyxy_to_cxcywh)
 from mmdet.utils import (ConfigType, InstanceList, MultiConfig, OptConfigType,
                          OptInstanceList, reduce_mean)
-from mmdet.models.layers import CdnQueryGenerator
-from mmdet.models import DINOHead
 
 
 @MODELS.register_module()
@@ -126,10 +126,13 @@ class CoDINOHead(DINOHead):
         mlvl_positional_encodings = []
         for feat in mlvl_feats:
             mlvl_masks.append(
-                F.interpolate(img_masks[None],
-                              size=feat.shape[-2:]).to(torch.bool).squeeze(0))
+                interpolate(img_masks[None],
+                            size=feat.shape[-2:]).to(torch.bool).squeeze(0))
+            # `positional_encoding` will return a float tensor by
+            # default. Convert it to the same dtype as `feat` for pure
+            # bf16/fp16 training
             mlvl_positional_encodings.append(
-                self.positional_encoding(mlvl_masks[-1]))
+                self.positional_encoding(mlvl_masks[-1]).to(dtype=feat.dtype))
 
         query_embeds = None
         hs, inter_references, topk_score, topk_anchor, enc_outputs = \
@@ -397,10 +400,13 @@ class CoDINOHead(DINOHead):
         mlvl_positional_encodings = []
         for feat in mlvl_feats:
             mlvl_masks.append(
-                F.interpolate(img_masks[None],
-                              size=feat.shape[-2:]).to(torch.bool).squeeze(0))
+                interpolate(img_masks[None],
+                            size=feat.shape[-2:]).to(torch.bool).squeeze(0))
+            # `positional_encoding` will return a float tensor by
+            # default. Convert it to the same dtype as `feat` for pure
+            # bf16/fp16 training
             mlvl_positional_encodings.append(
-                self.positional_encoding(mlvl_masks[-1]))
+                self.positional_encoding(mlvl_masks[-1]).to(dtype=feat.dtype))
 
         query_embeds = None
         hs, inter_references = self.transformer.forward_aux(

@@ -12,11 +12,13 @@ from torch import Tensor
 
 from mmdet.registry import MODELS, TASK_UTILS
 from mmdet.structures import SampleList
-from mmdet.structures.bbox import bbox_cxcywh_to_xyxy, bbox_xyxy_to_cxcywh, bbox_overlaps
+from mmdet.structures.bbox import (bbox_cxcywh_to_xyxy, bbox_overlaps,
+                                   bbox_xyxy_to_cxcywh)
 from mmdet.utils import (ConfigType, InstanceList, OptInstanceList,
                          OptMultiConfig, reduce_mean)
-from ..utils import multi_apply
 from ..losses import QualityFocalLoss
+from ..utils import multi_apply
+
 
 @MODELS.register_module()
 class DETRHead(BaseModule):
@@ -424,7 +426,8 @@ class DETRHead(BaseModule):
             gt_instances=gt_instances,
             img_meta=img_meta)
 
-        gt_bboxes = gt_instances.bboxes
+        # The type of `bboxes` should be consistent with the `cls_score`
+        gt_bboxes = gt_instances.bboxes.type_as(cls_score)
         gt_labels = gt_instances.labels
         pos_inds = torch.nonzero(
             assign_result.gt_inds > 0, as_tuple=False).squeeze(-1).unique()
@@ -448,8 +451,14 @@ class DETRHead(BaseModule):
         # DETR regress the relative position of boxes (cxcywh) in the image.
         # Thus the learning target should be normalized by the image size, also
         # the box format should be converted from defaultly x1y1x2y2 to cxcywh.
-        pos_gt_bboxes_normalized = pos_gt_bboxes / factor
+
+        # `pos_gt_bboxes / factor` will return a float tensor by default.
+        # Use `type_as` here to make sure the dtype of gt_bboxes is the same as
+        # the pred_bboxes.
+        pos_gt_bboxes_normalized = (pos_gt_bboxes / factor).type_as(
+            bbox_targets)
         pos_gt_bboxes_targets = bbox_xyxy_to_cxcywh(pos_gt_bboxes_normalized)
+        pos_gt_bboxes_targets = pos_gt_bboxes_targets
         bbox_targets[pos_inds] = pos_gt_bboxes_targets
         return (labels, label_weights, bbox_targets, bbox_weights, pos_inds,
                 neg_inds)
